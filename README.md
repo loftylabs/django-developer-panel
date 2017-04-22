@@ -4,7 +4,7 @@
 
 Install this module with pip:
 
-    pip install git+ssh://git@github.com:/loftylabs/django-developer-panel.git
+    pip install django-developer-panel
 
 Add the Developer Panel middleware to your application's `settings.py` and make sure `DEBUG` is enabled:
 

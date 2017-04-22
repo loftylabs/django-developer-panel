@@ -1,8 +1,8 @@
 from distutils.core import setup
 
 setup(
-    name='Django Developer Panel',
-    version='1.0',
+    name='django-developer-panel',
+    version='0.1-alpha',
     description='Django bindings for the Django Developer Panel Chrome extension.',
     author='Casey Kinsey / Lofty Labs',
     author_email='casey@hirelofty.com',
