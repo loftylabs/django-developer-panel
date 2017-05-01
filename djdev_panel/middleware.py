@@ -55,6 +55,12 @@ def debug_payload(request, response):
     for check in raw_checks:
         checks[check.id] = check.msg
 
+    json_friendly_settings = OrderedDict()
+    s = get_safe_settings()
+    for key in sorted(s.keys()):
+        json_friendly_settings[key] = str(s[key])
+
+
     payload = {
         'version': django.VERSION,
         'current_user': json.loads(user_data)[0],
@@ -64,7 +70,7 @@ def debug_payload(request, response):
         'url_name': resolved_url.url_name,
         'url_namespaces': resolved_url.namespaces,
         'checks': checks,
-        'settings': OrderedDict(sorted(get_safe_settings().items(), key=lambda s: s[0]))
+        'settings': json_friendly_settings
     }
 
     payload_script = "<script>var dj_chrome = {};</script>".format(json.dumps(payload,
@@ -72,18 +78,26 @@ def debug_payload(request, response):
 
     return payload_script
 
+class DebugMiddleware:
+    """
+    Should be new-style and old-style compatible.
+    """
 
-class DebugMiddleware(object):
-    def __init__(self, get_response):
-        self.get_response = get_response
-        self._view_data = {}
-        # One-time configuration and initialization.
+    def __init__(self, next_layer=None):
+        """We allow next_layer to be None because old-style middlewares
+        won't accept any argument.
+        """
+        self.get_response = next_layer
 
-    def __call__(self, request):
-        # Code to be executed for each request before
-        # the view (and later middleware) are called.
+    def process_request(self, request):
+        """Let's handle old-style request processing here, as usual."""
+        # Do something with request
+        # Probably return None
+        # Or return an HttpResponse in some cases
 
-        response = self.get_response(request)
+    def process_response(self, request, response):
+        """Let's handle old-style response processing here, as usual."""
+        # Do something with response, possibly using request.
 
         # For debug only.
         if not settings.DEBUG:
@@ -108,4 +122,15 @@ class DebugMiddleware(object):
             if response.get('Content-Length', None):
                 response['Content-Length'] = len(response.content)
 
+        return response
+
+    def __call__(self, request):
+        """Handle new-style middleware here."""
+        response = self.process_request(request)
+        if response is None:
+            # If process_request returned None, we must call the next middleware or
+            # the view. Note that here, we are sure that self.get_response is not
+            # None because this method is executed only in new-style middlewares.
+            response = self.get_response(request)
+        response = self.process_response(request, response)
         return response
