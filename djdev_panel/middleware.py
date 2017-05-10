@@ -1,7 +1,9 @@
 import json
 from collections import OrderedDict
+from collections import defaultdict
 
 import django
+import inspect
 import re
 
 from django.conf import settings
@@ -15,7 +17,7 @@ from django.views.debug import get_safe_settings
 from django.utils.functional import Promise
 from django.core.serializers.json import DjangoJSONEncoder
 from django.urls import resolve
-
+from django.views.generic.base import ContextMixin
 
 _HTML_TYPES = ('text/html', 'application/xhtml+xml')
 
@@ -27,7 +29,7 @@ class LazyEncoder(DjangoJSONEncoder):
         return super(LazyEncoder, self).default(obj)
 
 
-def debug_payload(request, response):
+def debug_payload(request, response, view_data):
 
     current_session = {}
 
@@ -43,10 +45,13 @@ def debug_payload(request, response):
 
     resolved_url = resolve(request.path)
 
-    view_data = {
+    view = {
         'view_name': resolved_url._func_path,
         'view_args': resolved_url.args,
         'view_kwargs': resolved_url.kwargs,
+        'view_methods': VIEW_METHOD_DATA,
+        'cbv': view_data.get('cbv', False),
+        'bases': view_data.get('bases', []),
     }
 
     checks = {}
@@ -55,16 +60,21 @@ def debug_payload(request, response):
     for check in raw_checks:
         checks[check.id] = check.msg
 
+    json_friendly_settings = OrderedDict()
+    s = get_safe_settings()
+    for key in sorted(s.keys()):
+        json_friendly_settings[key] = str(s[key])
+
     payload = {
         'version': django.VERSION,
         'current_user': json.loads(user_data)[0],
         'db_queries': connection.queries,
         'session': current_session,
-        'view_data': view_data,
+        'view_data': view,
         'url_name': resolved_url.url_name,
         'url_namespaces': resolved_url.namespaces,
         'checks': checks,
-        'settings': OrderedDict(sorted(get_safe_settings().items(), key=lambda s: s[0]))
+        'settings': json_friendly_settings
     }
 
     payload_script = "<script>var dj_chrome = {};</script>".format(json.dumps(payload,
@@ -73,17 +83,107 @@ def debug_payload(request, response):
     return payload_script
 
 
-class DebugMiddleware(object):
-    def __init__(self, get_response):
-        self.get_response = get_response
-        self._view_data = {}
-        # One-time configuration and initialization.
+VIEW_METHOD_WHITEIST = [
+    'get_context_data',
+    'get_template_names',
+    'get_queryset',
+    'get_object',
+    'get_form_class',
+    'get_form_kwargs',
+    'get_redirect_field_name',
+    'get_slug_field',
+    'get_context_object_name',
+    'get_login_url',
+    'http_method_not_allowed',
+]
 
-    def __call__(self, request):
-        # Code to be executed for each request before
-        # the view (and later middleware) are called.
+VIEW_METHOD_DATA = {}
+PATCHED_METHODS = defaultdict(list)
 
-        response = self.get_response(request)
+
+def record_view_data(f):
+    def wrapper(self, *args, **kwargs):
+        retval = f(self, *args, **kwargs)
+
+        VIEW_METHOD_DATA[f.__name__] = {
+            'args': repr(args),
+            'kwargs': repr(kwargs),
+            'return': repr(retval)
+        }
+
+        return retval
+    return wrapper
+
+
+def decorate_method(klass, method):
+    attached_method = getattr(klass, method)
+    patched_method = record_view_data(attached_method)
+    setattr(klass, method, patched_method)
+    return patched_method
+
+
+class DebugMiddleware:
+    """
+    Should be new-style and old-style compatible.
+    """
+
+
+    def __init__(self, next_layer=None):
+        """We allow next_layer to be None because old-style middlewares
+        won't accept any argument.
+        """
+        self.get_response = next_layer
+
+    def process_view(self, request, view_func, view_args, view_kwargs):
+        """
+        Collect data on Class-Based Views
+        """
+
+        # Purge data in view method cache
+        for key in VIEW_METHOD_DATA.keys():
+            del VIEW_METHOD_DATA[key]
+
+        self.view_data = {}
+
+        try:
+            cbv = view_func.view_class
+        except AttributeError:
+            cbv = False
+
+        if cbv:
+
+            self.view_data['cbv'] = True
+            klass = view_func.view_class
+            self.view_data['bases'] = [base.__name__ for base in inspect.getmro(klass)]
+            # Inject with drugz
+
+            for member in inspect.getmembers(view_func.view_class):
+                # Check that we are interested in capturing data for this method
+                # and ensure that a decorated method is not decorated multiple times.
+                if member[0] in VIEW_METHOD_WHITEIST and member[0] not in PATCHED_METHODS[klass]:
+                    decorate_method(klass, member[0])
+                    PATCHED_METHODS[klass].append(member[0])
+
+    def process_template_response(self, request, response):
+
+        if response.context_data is None:
+            return response
+
+        view = response.context_data.get('view', None)
+
+        if ContextMixin in self.view_data.get('bases', []):
+            self.view_data['context'] = view.get_context_data()
+
+        return response
+
+    def process_request(self, request):
+        """Let's handle old-style request processing here, as usual."""
+        # Do something with request
+        # Probably return None
+        # Or return an HttpResponse in some cases
+
+    def process_response(self, request, response):
+        """Let's handle old-style response processing here, as usual."""
 
         # For debug only.
         if not settings.DEBUG:
@@ -103,9 +203,20 @@ class DebugMiddleware(object):
         bits = re.split(pattern, content, flags=re.IGNORECASE)
 
         if len(bits) > 1:
-            bits[-2] += debug_payload(request, response)
+            bits[-2] += debug_payload(request, response, self.view_data)
             response.content = "</body>".join(bits)
             if response.get('Content-Length', None):
                 response['Content-Length'] = len(response.content)
 
+        return response
+
+    def __call__(self, request):
+        """Handle new-style middleware here."""
+        response = self.process_request(request)
+        if response is None:
+            # If process_request returned None, we must call the next middleware or
+            # the view. Note that here, we are sure that self.get_response is not
+            # None because this method is executed only in new-style middlewares.
+            response = self.get_response(request)
+        response = self.process_response(request, response)
         return response
