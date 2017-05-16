@@ -127,7 +127,6 @@ class DebugMiddleware:
     Should be new-style and old-style compatible.
     """
 
-
     def __init__(self, next_layer=None):
         """We allow next_layer to be None because old-style middlewares
         won't accept any argument.
@@ -140,7 +139,9 @@ class DebugMiddleware:
         """
 
         # Purge data in view method cache
-        for key in VIEW_METHOD_DATA.keys():
+        # Python 3's keys() method returns an iterator, so force evaluation before iterating.
+        view_keys = list(VIEW_METHOD_DATA.keys())
+        for key in view_keys:
             del VIEW_METHOD_DATA[key]
 
         self.view_data = {}
