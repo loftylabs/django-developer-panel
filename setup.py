@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name='django-developer-panel',
-    version='0.1-alpha',
+    version='0.1.2',
     description='Django bindings for the Django Developer Panel Chrome extension.',
     author='Casey Kinsey / Lofty Labs',
     author_email='casey@hirelofty.com',

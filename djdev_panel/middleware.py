@@ -16,7 +16,12 @@ from django.views.debug import get_safe_settings
 
 from django.utils.functional import Promise
 from django.core.serializers.json import DjangoJSONEncoder
-from django.urls import resolve
+
+try:
+    from django.urls import resolve
+except ImportError:
+    from django.core.urlresolvers import resolve
+
 from django.views.generic.base import ContextMixin
 
 _HTML_TYPES = ('text/html', 'application/xhtml+xml')
@@ -127,7 +132,6 @@ class DebugMiddleware:
     Should be new-style and old-style compatible.
     """
 
-
     def __init__(self, next_layer=None):
         """We allow next_layer to be None because old-style middlewares
         won't accept any argument.
@@ -140,7 +144,9 @@ class DebugMiddleware:
         """
 
         # Purge data in view method cache
-        for key in VIEW_METHOD_DATA.keys():
+        # Python 3's keys() method returns an iterator, so force evaluation before iterating.
+        view_keys = list(VIEW_METHOD_DATA.keys())
+        for key in view_keys:
             del VIEW_METHOD_DATA[key]
 
         self.view_data = {}
