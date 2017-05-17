@@ -16,7 +16,12 @@ from django.views.debug import get_safe_settings
 
 from django.utils.functional import Promise
 from django.core.serializers.json import DjangoJSONEncoder
-from django.urls import resolve
+
+try:
+    from django.urls import resolve
+except ImportError:
+    from django.core.urlresolvers import resolve
+
 from django.views.generic.base import ContextMixin
 
 _HTML_TYPES = ('text/html', 'application/xhtml+xml')
