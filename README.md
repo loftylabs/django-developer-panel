@@ -1,5 +1,5 @@
 # django-developer-panel
-![Django Developer Panel Interface](http://hirelofty.com/media/images/Screen_Shot_2017-05-12_at_5.20.30_PM.width-800.png)
+![Django Developer Panel Interface](https://hirelofty-prod.s3.amazonaws.com/media/images/Screen_Shot_2017-05-12_at_5.20.30_PM.original.png)
 
 ## Installation
 
